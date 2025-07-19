@@ -1,41 +1,165 @@
-import { useNavigation } from '@react-navigation/native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, FlatList, ActivityIndicator, StyleSheet } from 'react-native';
+import { initDatabase, saveMenuItems, getMenuItems, getCategories } from '../database/db';
+import Header from './Header';
+import HeroBanner from '../components/HeroBanner';
+import CategoryList from '../components/CategoryList';
+import MenuItem from '../components/MenuItem';
 
-const Header = () => {
-  const navigation = useNavigation();
-  
+const Home = () => {
+  const [menu, setMenu] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [selectedCategories, setSelectedCategories] = useState([]);
+  const [searchText, setSearchText] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+
+  // Initialize database
+  useEffect(() => {
+    initDatabase();
+    fetchMenuData();
+  }, []);
+
+  // Fetch menu data from API or DB
+  const fetchMenuData = async () => {
+    try {
+      // First check if we have data in DB
+      getMenuItems({}, (dbItems) => {
+        if (dbItems.length > 0) {
+          setMenu(dbItems);
+          extractCategories(dbItems);
+          setLoading(false);
+        } else {
+          fetchRemoteData();
+        }
+      });
+    } catch (error) {
+      console.error('DB check error:', error);
+      fetchRemoteData();
+    }
+  };
+
+  // Fetch from remote API
+  const fetchRemoteData = async () => {
+    try {
+      const response = await fetch('https://raw.githubusercontent.com/Meta-Mobile-Developer-PC/Working-With-Data-API/main/menu.json');
+      const { menu: remoteMenu } = await response.json();
+      
+      // Add categories to menu items (this would come from API in real app)
+      const categorizedMenu = remoteMenu.map(item => ({
+        ...item,
+        category: getCategoryForItem(item.name)
+      }));
+      
+      saveMenuItems(categorizedMenu);
+      setMenu(categorizedMenu);
+      extractCategories(categorizedMenu);
+    } catch (error) {
+      console.error('Fetch error:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Extract unique categories
+  const extractCategories = (items) => {
+    const uniqueCategories = [...new Set(items.map(item => item.category))];
+    setCategories(uniqueCategories);
+  };
+
+  // Search debouncing
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearch(searchText);
+    }, 500);
+    return () => clearTimeout(handler);
+  }, [searchText]);
+
+  // Filter menu items based on selections
+  useEffect(() => {
+    getMenuItems(
+      {
+        categories: selectedCategories,
+        searchText: debouncedSearch
+      },
+      (filteredItems) => setMenu(filteredItems)
+    );
+  }, [selectedCategories, debouncedSearch]);
+
+  // Toggle category selection
+  const handleToggleCategory = (category) => {
+    setSelectedCategories(prev => 
+      prev.includes(category) 
+        ? prev.filter(c => c !== category) 
+        : [...prev, category]
+    );
+  };
+
+  const handleSearchChange = (text) => {
+    setSearchText(text);
+  };
+
+  // Render menu item
+  const renderMenuItem = ({ item }) => (
+    <MenuItem 
+      name={item.name}
+      price={item.price}
+      description={item.description}
+      imageUrl={`https://github.com/Meta-Mobile-Developer-PC/Working-With-Data-API/blob/main/images/${item.image}?raw=true`}
+    />
+  );
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#495E57" />
+      </View>
+    );
+  }
+
   return (
-    <View style={headerStyles.container}>
-      <Image 
-        source={require('../assets/Logo.png')} 
-        style={headerStyles.logo} 
+    <View style={styles.container}>
+      <Header />
+      <HeroBanner 
+        searchText={searchText}
+        onSearchChange={handleSearchChange}
       />
-      <TouchableOpacity onPress={() => navigation.navigate('Profile')}>
-        <Image 
-          source={require('../assets/avatar.png')} 
-          style={headerStyles.avatar} 
-        />
-      </TouchableOpacity>
+      <CategoryList
+        categories={categories}
+        selectedCategories={selectedCategories}
+        onToggleCategory={handleToggleCategory}
+      />
+      <FlatList
+        data={menu}
+        renderItem={renderMenuItem}
+        keyExtractor={item => item.id.toString()}
+        contentContainerStyle={styles.listContent}
+      />
     </View>
   );
 };
 
-const headerStyles = StyleSheet.create({
+// Helper function to categorize items (simplified)
+const getCategoryForItem = (name) => {
+  if (name.includes('Salad')) return 'Salads';
+  if (name.includes('Dessert')) return 'Desserts';
+  if (name.includes('Pasta')) return 'Mains';
+  return 'Starters';
+};
+
+const styles = StyleSheet.create({
   container: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    padding: 15,
-    backgroundColor: '#F4CE14',
+    flex: 1,
+    backgroundColor: '#EDEFEE',
   },
-  logo: {
-    height: 50,
-    width: 150,
-    resizeMode: 'contain',
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  avatar: {
-    height: 40,
-    width: 40,
-    borderRadius: 20,
+  listContent: {
+    paddingBottom: 20,
   },
 });
 
-// Add <Header /> at top of Home component
+export default Home;
